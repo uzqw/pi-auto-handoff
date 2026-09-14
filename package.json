@@ -1,0 +1,14 @@
+{
+  "name": "pi-auto-handoff",
+  "version": "0.1.0",
+  "description": "Proactive context handoff for the pi coding agent: past a token threshold, continue in a fresh session that reads the old transcript on demand.",
+  "license": "MIT",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["extensions/auto-handoff/index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}
