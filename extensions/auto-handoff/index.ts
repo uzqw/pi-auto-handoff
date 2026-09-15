@@ -33,6 +33,7 @@ import { homedir } from "node:os";
 const CONFIG_PATH = join(homedir(), ".pi", "agent", "auto-handoff.json");
 const DEFAULT_THRESHOLD = 100_000;
 const TARGET_TYPE = "auto-handoff-target";
+const DONE_TYPE = "auto-handoff-done";
 
 /** Fallback in case import.meta.url is unavailable in the bundled runtime. */
 const EXTENSION_DIR = (() => {
@@ -104,10 +105,14 @@ export default function (pi: ExtensionAPI) {
 
   /** True when this session was itself created by auto-handoff (marker in its entries). */
   function isHandoffTarget(ctx: ExtensionContext): boolean {
+    return hasMarker(ctx, TARGET_TYPE);
+  }
+
+  function hasMarker(ctx: ExtensionContext, customType: string): boolean {
     try {
       return ctx.sessionManager
         .getEntries()
-        .some((e) => e.type === "custom" && e.customType === TARGET_TYPE);
+        .some((e) => e.type === "custom" && e.customType === customType);
     } catch {
       return false;
     }
@@ -122,6 +127,11 @@ export default function (pi: ExtensionAPI) {
     }
     handingOff = true;
     try {
+      // Persist a marker on THIS session before replacing it. The event-context
+      // sessionManager is read-only, but pi.appendEntry writes through to the
+      // live SessionManager. This survives extension reloads: a second settle
+      // on the same session (see below) sees the marker and stops.
+      pi.appendEntry(DONE_TYPE, { to: "pending" });
       const result = await ctx.newSession({
         parentSession: parentFile,
         // Mark the fresh session so its first settle does not immediately hand off again.
@@ -187,6 +197,12 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("agent_settled", async (_event, ctx) => {
     if (!cfg.enabled || handingOff || attempted) return;
+    // Persisted guard: this session already handed off. Covers the case where
+    // the /handoff command's sendUserMessage falls through to a real prompt on
+    // the (about-to-be-disposed) session, producing a second agent_settled on
+    // the OLD session after the extension instance was reloaded — the in-memory
+    // `attempted` flag is gone by then, but this marker is on disk.
+    if (hasMarker(ctx, DONE_TYPE)) return;
     if (isHandoffTarget(ctx)) return; // brand-new session from a handoff: let it work
     const usage = ctx.getContextUsage?.();
     if (!usage || usage.tokens == null || usage.tokens < cfg.threshold) return;
